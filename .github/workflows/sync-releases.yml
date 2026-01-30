@@ -2,8 +2,8 @@ name: Sync Releases from Upstream
 
 on:
   schedule:
-    - cron: "0 */6 * * *"   # 每 6 小时自动同步一次
-  workflow_dispatch:        # 允许手动触发
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
 
 jobs:
   sync:
@@ -13,29 +13,20 @@ jobs:
       - name: Checkout fork repo
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
       - name: Install GitHub CLI
-        run: sudo apt-get install -y gh
+        run: sudo apt-get install -y gh jq
 
       - name: Sync Releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          UPSTREAM: "bggRGjQaUbCoE/PiliPlus"   # ← 已替你填好
+          UPSTREAM: "bggRGjQaUbCoE/PiliPlus"
           FORK: "${{ github.repository }}"
         run: |
           echo "Fetching releases from $UPSTREAM"
 
-          # 获取上游所有 releases 的 tag
-          gh release list -R $UPSTREAM --limit 100 | awk '{print $1}' > upstream_tags.txt
+          gh release list -R $UPSTREAM --limit 200 | awk '{print $1}' > upstream_tags.txt
+          gh release list -R $FORK --limit 200 | awk '{print $1}' > fork_tags.txt
 
-          # 获取当前 fork 的 releases tag
-          gh release list -R $FORK --limit 100 | awk '{print $1}' > fork_tags.txt
-
-          # 找出 fork 缺少的 releases
           missing=$(comm -23 <(sort upstream_tags.txt) <(sort fork_tags.txt))
 
           if [ -z "$missing" ]; then
@@ -49,24 +40,36 @@ jobs:
           for tag in $missing; do
             echo "Syncing release $tag"
 
-            # 下载上游 release 资产
             mkdir -p assets
             gh release download $tag -R $UPSTREAM -D assets/
 
-            # 获取 release notes
             notes=$(gh release view $tag -R $UPSTREAM --json body -q .body)
 
-            # 只上传文件，不上传目录
+            # 获取所有文件（排除目录）
             files=$(find assets -type f)
 
-            if [ -z "$files" ]; then
-              echo "No files to upload for $tag"
-              gh release create $tag -R $FORK --notes "$notes" --title "$tag"
-            else
-              gh release create $tag $files -R $FORK --notes "$notes" --title "$tag"
+            # 如果 Fork 已经存在同名 Release，则删除旧资产
+            if gh release view $tag -R $FORK > /dev/null 2>&1; then
+              echo "Release $tag already exists in fork. Cleaning old assets..."
+
+              asset_ids=$(gh release view $tag -R $FORK --json assets | jq -r '.assets[].id')
+
+              for id in $asset_ids; do
+                gh api \
+                  --method DELETE \
+                  repos/$FORK/releases/assets/$id
+              done
             fi
 
+            # 创建或更新 Release
+            if [ -z "$files" ]; then
+              echo "No files to upload for $tag"
+              gh release create $tag -R $FORK --notes "$notes" --title "$tag" || \
+              gh release edit $tag -R $FORK --notes "$notes" --title "$tag"
+            else
+              gh release create $tag $files -R $FORK --notes "$notes" --title "$tag" || \
+              gh release edit $tag $files -R $FORK --notes "$notes" --title "$tag"
+            fi
 
             rm -rf assets
           done
-
