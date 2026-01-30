@@ -24,43 +24,43 @@ jobs:
         run: |
           echo "Fetching releases from $UPSTREAM"
 
+          # 获取上游所有 release tag
           gh release list -R $UPSTREAM --limit 200 | awk '{print $1}' > upstream_tags.txt
-          gh release list -R $FORK --limit 200 | awk '{print $1}' > fork_tags.txt
 
-          missing=$(comm -23 <(sort upstream_tags.txt) <(sort fork_tags.txt))
-
-          if [ -z "$missing" ]; then
-            echo "No new releases to sync."
-            exit 0
-          fi
-
-          echo "Need to sync:"
-          echo "$missing"
-
-          for tag in $missing; do
+          for tag in $(cat upstream_tags.txt); do
             echo "Syncing release $tag"
 
-            # 如果 fork 已经有这个 release，直接删除整个 release
-            if gh release view $tag -R $FORK > /dev/null 2>&1; then
-              echo "Deleting old release $tag"
-              gh release delete $tag -R $FORK -y
+            # 获取上游 release notes
+            notes=$(gh release view $tag -R $UPSTREAM --json body -q .body)
+
+            # 如果 fork 没有这个 release，则创建一个空的
+            if ! gh release view $tag -R $FORK > /dev/null 2>&1; then
+              echo "Creating empty release $tag in fork"
+              gh release create $tag -R $FORK --notes "$notes" --title "$tag" || true
             fi
 
+            # 下载上游 release 资产
+            rm -rf assets
             mkdir -p assets
             gh release download $tag -R $UPSTREAM -D assets/
-
-            notes=$(gh release view $tag -R $UPSTREAM --json body -q .body)
 
             # 获取所有文件（排除目录）
             files=$(find assets -type f)
 
-            echo "Creating new release $tag"
+            # 删除 fork 中同名资产
+            asset_ids=$(gh release view $tag -R $FORK --json assets | jq -r '.assets[].id')
+            for id in $asset_ids; do
+              name=$(gh api repos/$FORK/releases/assets/$id -q .name)
+              if echo "$files" | grep -q "$name"; then
+                echo "Deleting old asset $name"
+                gh api --method DELETE repos/$FORK/releases/assets/$id
+              fi
+            done
 
-            if [ -z "$files" ]; then
-              gh release create $tag -R $FORK --notes "$notes" --title "$tag"
-            else
-              gh release create $tag $files -R $FORK --notes "$notes" --title "$tag"
-            fi
+            # 上传新资产
+            for f in $files; do
+              echo "Uploading asset $f"
+              gh release upload $tag "$f" -R $FORK --clobber
+            done
 
-            rm -rf assets
           done
