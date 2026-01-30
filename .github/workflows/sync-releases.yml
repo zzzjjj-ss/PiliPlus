@@ -56,8 +56,17 @@ jobs:
             # 获取 release notes
             notes=$(gh release view $tag -R $UPSTREAM --json body -q .body)
 
-            # 在 fork 创建 release
-            gh release create $tag assets/* -R $FORK --notes "$notes" --title "$tag"
+            # 只上传文件，不上传目录
+            files=$(find assets -type f)
+
+            if [ -z "$files" ]; then
+              echo "No files to upload for $tag"
+              gh release create $tag -R $FORK --notes "$notes" --title "$tag"
+            else
+              gh release create $tag $files -R $FORK --notes "$notes" --title "$tag"
+            fi
+
 
             rm -rf assets
           done
+
