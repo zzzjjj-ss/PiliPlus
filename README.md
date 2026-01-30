@@ -2,6 +2,14 @@
     <img width="200" height="200" src="assets/images/logo/logo.png">
 </div>
 
+<div>
+  <sub>
+    本仓库用于归档与同步 <code>bggRGjQaUbCoE/PiliPlus</code>，以防上游因各种原因消失。<br>
+    代码与文档仅供学习与研究使用，请勿用于任何违法或违规用途。
+  </sub>
+</div>
+
+<br/>
 
 
 <div align="center">
