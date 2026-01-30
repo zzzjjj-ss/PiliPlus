@@ -40,6 +40,12 @@ jobs:
           for tag in $missing; do
             echo "Syncing release $tag"
 
+            # 如果 fork 已经有这个 release，直接删除整个 release
+            if gh release view $tag -R $FORK > /dev/null 2>&1; then
+              echo "Deleting old release $tag"
+              gh release delete $tag -R $FORK -y
+            fi
+
             mkdir -p assets
             gh release download $tag -R $UPSTREAM -D assets/
 
@@ -48,27 +54,12 @@ jobs:
             # 获取所有文件（排除目录）
             files=$(find assets -type f)
 
-            # 如果 Fork 已经存在同名 Release，则删除旧资产
-            if gh release view $tag -R $FORK > /dev/null 2>&1; then
-              echo "Release $tag already exists in fork. Cleaning old assets..."
+            echo "Creating new release $tag"
 
-              asset_ids=$(gh release view $tag -R $FORK --json assets | jq -r '.assets[].id')
-
-              for id in $asset_ids; do
-                gh api \
-                  --method DELETE \
-                  repos/$FORK/releases/assets/$id
-              done
-            fi
-
-            # 创建或更新 Release
             if [ -z "$files" ]; then
-              echo "No files to upload for $tag"
-              gh release create $tag -R $FORK --notes "$notes" --title "$tag" || \
-              gh release edit $tag -R $FORK --notes "$notes" --title "$tag"
+              gh release create $tag -R $FORK --notes "$notes" --title "$tag"
             else
-              gh release create $tag $files -R $FORK --notes "$notes" --title "$tag" || \
-              gh release edit $tag $files -R $FORK --notes "$notes" --title "$tag"
+              gh release create $tag $files -R $FORK --notes "$notes" --title "$tag"
             fi
 
             rm -rf assets
