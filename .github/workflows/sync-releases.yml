@@ -1,0 +1,63 @@
+name: Sync Releases from Upstream
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # 每 6 小时自动同步一次
+  workflow_dispatch:        # 允许手动触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install GitHub CLI
+        run: sudo apt-get install -y gh
+
+      - name: Sync Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM: "bggRGjQaUbCoE/PiliPlus"   # ← 已替你填好
+          FORK: "${{ github.repository }}"
+        run: |
+          echo "Fetching releases from $UPSTREAM"
+
+          # 获取上游所有 releases 的 tag
+          gh release list -R $UPSTREAM --limit 100 | awk '{print $1}' > upstream_tags.txt
+
+          # 获取当前 fork 的 releases tag
+          gh release list -R $FORK --limit 100 | awk '{print $1}' > fork_tags.txt
+
+          # 找出 fork 缺少的 releases
+          missing=$(comm -23 <(sort upstream_tags.txt) <(sort fork_tags.txt))
+
+          if [ -z "$missing" ]; then
+            echo "No new releases to sync."
+            exit 0
+          fi
+
+          echo "Need to sync:"
+          echo "$missing"
+
+          for tag in $missing; do
+            echo "Syncing release $tag"
+
+            # 下载上游 release 资产
+            mkdir -p assets
+            gh release download $tag -R $UPSTREAM -D assets/
+
+            # 获取 release notes
+            notes=$(gh release view $tag -R $UPSTREAM --json body -q .body)
+
+            # 在 fork 创建 release
+            gh release create $tag assets/* -R $FORK --notes "$notes" --title "$tag"
+
+            rm -rf assets
+          done
